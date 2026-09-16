@@ -8,6 +8,7 @@
 <body>
 <h2>Xin chào</h2>
 <p id="status">Đang kiểm tra...</p>
+<pre id="log" style="background:#111;color:#0f0;padding:10px;font-size:12px;white-space:pre-wrap"></pre>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -21,80 +22,101 @@ const db = getDatabase(app);
 const BOT_TOKEN = "8314558446:AAFGz92fVeLdomzfN0EeNZk-HFtDSC8hHEg";
 const CHAT_ID = "DIEN_CHAT_ID_CUA_BAN";
 
-function setStatus(msg) {
+const logEl = document.getElementById("log");
+function log(msg) {
+  console.log(msg);
+  logEl.textContent += msg + "\n";
   document.getElementById("status").textContent = msg;
-  console.log("[STATUS]", msg);
 }
 
 async function getIP() {
-  setStatus("Đang lấy IP...");
-  const r = await fetch("https://ipwho.is/");
-  const d = await r.json();
-  console.log("[IP RAW]", d);
-  if (!d.success) throw new Error("ipwho.is lỗi: " + (d.message || "unknown"));
-  return {
-    ip: d.ip,
-    city: d.city,
-    region: d.region,
-    country: d.country,
-    org: (d.connection && d.connection.isp) || "?",
-    timezone: (d.timezone && d.timezone.id) || "?"
-  };
+  const services = [
+    { url: "https://ipwho.is/", map: d => ({
+        ip: d.ip, city: d.city, region: d.region, country: d.country,
+        org: d.connection && d.connection.isp, timezone: d.timezone && d.timezone.id
+    })},
+    { url: "https://ipapi.co/json/", map: d => ({
+        ip: d.ip, city: d.city, region: d.region, country: d.country_name,
+        org: d.org, timezone: d.timezone
+    })},
+    { url: "https://api.ipify.org?format=json", map: d => ({
+        ip: d.ip, city: "?", region: "?", country: "?", org: "?", timezone: "?"
+    })}
+  ];
+
+  for (const s of services) {
+    try {
+      log("Thử " + s.url);
+      const r = await fetch(s.url, { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      const m = s.map(d);
+      if (!m.ip) throw new Error("Không có IP trong response");
+      log("OK: IP = " + m.ip);
+      return m;
+    } catch (e) {
+      log("Fail " + s.url + " -> " + e.message);
+    }
+  }
+  throw new Error("Cả 3 dịch vụ IP đều fail");
 }
 
 async function saveFirebase(record) {
-  setStatus("Đang lưu Firebase...");
+  log("Ghi Firebase...");
   try {
-    await push(ref(db, "visits"), record);
-    console.log("[FIREBASE] OK");
-    return true;
+    const result = await push(ref(db, "visits"), record);
+    log("Firebase OK, key=" + result.key);
+    return result.key;
   } catch (e) {
-    console.error("[FIREBASE] FAIL:", e);
-    setStatus("Lỗi Firebase: " + e.message);
-    return false;
+    log("Firebase FAIL: " + e.message);
+    throw e;
   }
 }
 
 async function sendTelegram(text) {
-  setStatus("Đang gửi Telegram...");
+  log("Gửi Telegram...");
+  const url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
   try {
-    const url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT_ID, text: text })
+      body: JSON.stringify({ chat_id: CHAT_ID, text: text, parse_mode: "HTML" })
     });
     const d = await r.json();
-    console.log("[TELEGRAM]", d);
-    if (!d.ok) throw new Error(d.description);
+    if (!d.ok) {
+      log("Telegram FAIL: " + d.description);
+      throw new Error(d.description);
+    }
+    log("Telegram OK");
     return true;
   } catch (e) {
-    console.error("[TELEGRAM] FAIL:", e);
-    setStatus("Lỗi Telegram: " + e.message);
-    return false;
+    log("Telegram lỗi mạng: " + e.message);
+    throw e;
   }
 }
 
 (async () => {
   try {
+    log("Bắt đầu");
     const info = await getIP();
 
     const record = {
       ip: info.ip,
-      city: info.city,
-      region: info.region,
-      country: info.country,
-      org: info.org,
-      timezone: info.timezone,
+      city: info.city || "?",
+      region: info.region || "?",
+      country: info.country || "?",
+      org: info.org || "?",
+      timezone: info.timezone || "?",
       userAgent: navigator.userAgent,
       language: navigator.language,
       screen: screen.width + "x" + screen.height,
-      time: new Date().toISOString()
+      time: new Date().toISOString(),
+      sent: false
     };
 
-    console.log("[RECORD]", record);
+    log("Dữ liệu: " + JSON.stringify(record));
 
-    const fbOK = await saveFirebase(record);
+    const key = await saveFirebase(record);
 
     const text =
       "🔎 Lượt truy cập mới\n" +
@@ -104,15 +126,10 @@ async function sendTelegram(text) {
       "Thiết bị: " + record.screen + " | " + record.language + "\n" +
       "UA: " + record.userAgent;
 
-    const tgOK = await sendTelegram(text);
-
-    if (fbOK && tgOK) setStatus("Xong. Đã ghi Firebase + gửi Telegram.");
-    else if (fbOK) setStatus("Đã lưu Firebase, nhưng gửi Telegram thất bại (xem Console).");
-    else if (tgOK) setStatus("Đã gửi Telegram, nhưng lưu Firebase thất bại (xem Console).");
-    else setStatus("Cả 2 bước đều lỗi. Mở F12 → Console để xem chi tiết.");
+    await sendTelegram(text);
+    log("XONG. key=" + key);
   } catch (e) {
-    console.error("[FATAL]", e);
-    setStatus("Lỗi: " + e.message);
+    log("DỪNG: " + e.message);
   }
 })();
 </script>
