@@ -19,9 +19,6 @@ const app = initializeApp({
 });
 const db = getDatabase(app);
 
-const BOT_TOKEN = "8314558446:AAFGz92fVeLdomzfN0EeNZk-HFtDSC8hHEg";
-const CHAT_ID = "DIEN_CHAT_ID_CUA_BAN";
-
 const logEl = document.getElementById("log");
 function log(msg) {
   console.log(msg);
@@ -29,19 +26,47 @@ function log(msg) {
   document.getElementById("status").textContent = msg;
 }
 
+function countryFlag(code) {
+  if (!code || code.length !== 2) return "🏳";
+  code = code.toUpperCase();
+  return String.fromCodePoint(
+    0x1F1E6 + code.charCodeAt(0) - 65,
+    0x1F1E6 + code.charCodeAt(1) - 65
+  );
+}
+
 async function getIP() {
   const services = [
-    { url: "https://ipwho.is/", map: d => ({
-        ip: d.ip, city: d.city, region: d.region, country: d.country,
-        org: d.connection && d.connection.isp, timezone: d.timezone && d.timezone.id
-    })},
-    { url: "https://ipapi.co/json/", map: d => ({
-        ip: d.ip, city: d.city, region: d.region, country: d.country_name,
-        org: d.org, timezone: d.timezone
-    })},
-    { url: "https://api.ipify.org?format=json", map: d => ({
-        ip: d.ip, city: "?", region: "?", country: "?", org: "?", timezone: "?"
-    })}
+    {
+      url: "https://ipwho.is/",
+      map: d => ({
+        ip: d.ip, city: d.city, region: d.region,
+        country: d.country_code,
+        org: d.connection && d.connection.isp,
+        latitude: d.latitude, longitude: d.longitude
+      })
+    },
+    {
+      url: "https://ipapi.co/json/",
+      map: d => ({
+        ip: d.ip, city: d.city, region: d.region,
+        country: d.country_code,
+        org: d.org,
+        latitude: d.latitude, longitude: d.longitude
+      })
+    },
+    {
+      url: "https://ipinfo.io/json",
+      map: d => {
+        const parts = (d.loc || ",").split(",");
+        return {
+          ip: d.ip, city: d.city, region: d.region,
+          country: d.country,
+          org: d.org,
+          latitude: parts[0], longitude: parts[1]
+        };
+      }
+    }
   ];
 
   for (const s of services) {
@@ -51,48 +76,14 @@ async function getIP() {
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
       const m = s.map(d);
-      if (!m.ip) throw new Error("Không có IP trong response");
-      log("OK: IP = " + m.ip);
+      if (!m.ip) throw new Error("Không có IP");
+      log("OK: " + m.ip + " | " + m.country);
       return m;
     } catch (e) {
       log("Fail " + s.url + " -> " + e.message);
     }
   }
   throw new Error("Cả 3 dịch vụ IP đều fail");
-}
-
-async function saveFirebase(record) {
-  log("Ghi Firebase...");
-  try {
-    const result = await push(ref(db, "visits"), record);
-    log("Firebase OK, key=" + result.key);
-    return result.key;
-  } catch (e) {
-    log("Firebase FAIL: " + e.message);
-    throw e;
-  }
-}
-
-async function sendTelegram(text) {
-  log("Gửi Telegram...");
-  const url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT_ID, text: text, parse_mode: "HTML" })
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      log("Telegram FAIL: " + d.description);
-      throw new Error(d.description);
-    }
-    log("Telegram OK");
-    return true;
-  } catch (e) {
-    log("Telegram lỗi mạng: " + e.message);
-    throw e;
-  }
 }
 
 (async () => {
@@ -102,32 +93,27 @@ async function sendTelegram(text) {
 
     const record = {
       ip: info.ip,
-      city: info.city || "?",
-      region: info.region || "?",
-      country: info.country || "?",
       org: info.org || "?",
-      timezone: info.timezone || "?",
+      country: info.country || "?",
+      flag: countryFlag(info.country),
+      region: info.region || "?",
+      city: info.city || "?",
+      latitude: info.latitude || "",
+      longitude: info.longitude || "",
       userAgent: navigator.userAgent,
       language: navigator.language,
       screen: screen.width + "x" + screen.height,
       time: new Date().toISOString(),
-      sent: false
+      sent: false,
+      status: "⏳ chờ gửi",
+      sent_at: ""
     };
 
     log("Dữ liệu: " + JSON.stringify(record));
 
-    const key = await saveFirebase(record);
-
-    const text =
-      "🔎 Lượt truy cập mới\n" +
-      "IP: " + record.ip + "\n" +
-      "Nhà mạng: " + record.org + "\n" +
-      "Khu vực: " + record.city + ", " + record.region + ", " + record.country + "\n" +
-      "Thiết bị: " + record.screen + " | " + record.language + "\n" +
-      "UA: " + record.userAgent;
-
-    await sendTelegram(text);
-    log("XONG. key=" + key);
+    const result = await push(ref(db, "visits"), record);
+    log("Firebase OK, key=" + result.key);
+    log("XONG");
   } catch (e) {
     log("DỪNG: " + e.message);
   }
