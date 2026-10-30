@@ -16,7 +16,9 @@
   button { width: 100%; padding: 15px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-size: 1.1em; font-weight: bold; cursor: pointer; }
   button:hover { background: #0ea5e9; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .output { background: #000; padding: 15px; border-radius: 8px; font-family: monospace; color: #a3e635; margin-top: 20px; display: none; }
+  .output { background: #000; padding: 15px; border-radius: 8px; font-family: monospace; color: #a3e635; margin-top: 20px; display: none; white-space: pre-wrap; word-break: break-all; }
+  .err-text { color: #f87171; }
+  .info-text { color: #fbbf24; }
 </style>
 </head>
 <body>
@@ -28,7 +30,7 @@
       <label>1. Đường dẫn (Target Path)</label>
       <input type="text" id="targetPath" placeholder="Ví dụ: zlapi" value="">
 
-      <label>2. Chọn tất cả file (Ctrl+Click để chọn nhiều)</label>
+      <label>2. Chọn tất cả file (Giữ Ctrl để chọn nhiều)</label>
       <input type="file" id="fileInput" multiple required>
       <div id="fileList" style="font-size: 0.9em; color: #94a3b8; margin-bottom: 15px;"></div>
 
@@ -47,9 +49,9 @@
 <!-- Firebase SDK -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getDatabase, ref, push, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+  import { getDatabase, ref, push, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-  // Cấu hình Firebase của bạn (Chỉ cần databaseURL là đủ cho Realtime DB)
+  // Cấu hình Firebase (Chỉ cần databaseURL cho Realtime DB)
   const firebaseConfig = {
     databaseURL: "https://shopmduy-default-rtdb.asia-southeast1.firebasedatabase.app/"
   };
@@ -81,7 +83,7 @@
     }
   });
 
-  // Hàm chuyển File sang Base64 để lưu vào Firebase
+  // Hàm chuyển File sang Base64
   const fileToBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -95,14 +97,14 @@
     uploadBtn.disabled = true;
     uploadBtn.textContent = '⏳ Đang xử lý...';
     output.style.display = 'block';
-    output.innerHTML = 'Đang đọc file và đẩy lên Firebase...<br>';
+    output.innerHTML = '<span class="info-text">Đang đọc file và đẩy lên Firebase...</span><br>';
 
     const targetPath = document.getElementById('targetPath').value;
     const mainFile = mainFileSelect.value;
     const files = fileInput.files;
 
     if (!mainFile) {
-      alert("Vui lòng chọn file để chạy!");
+      output.innerHTML = '<span class="err-text">Lỗi: Vui lòng chọn file để chạy!</span>';
       uploadBtn.disabled = false;
       uploadBtn.textContent = '🚀 Gửi lên Firebase';
       return;
@@ -110,34 +112,68 @@
 
     try {
       const filesData = {};
-      // Đọc tất cả file thành Base64
       for (let i = 0; i < files.length; i++) {
         const base64 = await fileToBase64(files[i]);
         filesData[files[i].name] = base64;
       }
 
-      // Tạo object dữ liệu
       const jobData = {
         path: targetPath,
         main_file: mainFile,
-        files: filesData, // Lưu toàn bộ nội dung file dạng Base64
+        files: filesData,
         timestamp: Date.now(),
-        status: "pending" // Trạng thái chờ server xử lý
+        status: "pending"
       };
 
-      // Đẩy lên Firebase (Tạo một node mới ngẫu nhiên)
       const jobsRef = ref(db, 'jobs');
       const newJobRef = push(jobsRef);
       await set(newJobRef, jobData);
 
-      output.innerHTML = `✅ Đã gửi lên Firebase thành công!<br>Mã Job: ${newJobRef.key}<br>Chờ Server xử lý...`;
+      const jobId = newJobRef.key;
+      output.innerHTML += `<span style="color:#4ade80">✅ Đã gửi lên Firebase! Mã Job: ${jobId}</span><br>`;
+      output.innerHTML += `<span class="info-text">⏳ Đang chờ Server (Worker) xử lý...</span><br><br>`;
+
+      // Lắng nghe kết quả trả về từ Worker
+      const resultRef = ref(db, `jobs/${jobId}/result`);
+      onValue(resultRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          let html = `<span style="color:#38bdf8">📊 KẾT QUẢ TỪ SERVER:</span><br>`;
+          html += `<span class="info-text">Thời gian chạy: ${data.time}</span><br>`;
+          
+          if (data.success) {
+            html += `<span style="color:#4ade80">✅ Trạng thái: Thành công</span><br>`;
+            if (data.stdout) html += `<br>--- STDOUT ---<br>${escapeHtml(data.stdout)}`;
+            if (data.stderr) html += `<br><span class="err-text">--- STDERR ---<br>${escapeHtml(data.stderr)}</span>`;
+          } else {
+            html += `<span class="err-text">❌ Trạng thái: Lỗi</span><br>`;
+            html += `<span class="err-text">${escapeHtml(data.error || 'Không rõ lỗi')}</span><br>`;
+            if (data.stderr) html += `<br><span class="err-text">--- STDERR ---<br>${escapeHtml(data.stderr)}</span>`;
+          }
+          
+          output.innerHTML = html; // Ghi đè kết quả lên màn hình
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = '🚀 Gửi lên Firebase';
+        }
+      });
+
     } catch (error) {
-      output.innerHTML = `<span style="color:red">Lỗi: ${error.message}</span>`;
-    } finally {
+      // Bắt lỗi chi tiết (Fix lỗi undefined)
+      let errorMsg = "Không xác định";
+      if (error && error.message) errorMsg = error.message;
+      else if (typeof error === 'string') errorMsg = error;
+      else errorMsg = JSON.stringify(error);
+
+      output.innerHTML = `<span class="err-text">Lỗi: ${errorMsg}</span>`;
+      console.error("Lỗi Firebase:", error);
       uploadBtn.disabled = false;
       uploadBtn.textContent = '🚀 Gửi lên Firebase';
     }
   });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
 </script>
 </body>
 </html>
