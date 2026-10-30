@@ -2,109 +2,254 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>Kiểm tra truy cập</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐍 Python File Runner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    min-height: 100vh;
+    padding: 30px 20px;
+    color: #fff;
+  }
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 {
+    text-align: center;
+    margin-bottom: 10px;
+    font-size: 2em;
+  }
+  .subtitle {
+    text-align: center;
+    opacity: 0.8;
+    margin-bottom: 30px;
+  }
+  .card {
+    background: rgba(255,255,255,0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 20px;
+  }
+  .drop-zone {
+    border: 3px dashed rgba(255,255,255,0.4);
+    border-radius: 12px;
+    padding: 50px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: #4ade80;
+    background: rgba(74,222,128,0.1);
+  }
+  .drop-zone .icon { font-size: 3em; margin-bottom: 10px; }
+  .drop-zone input { display: none; }
+  .file-name {
+    margin-top: 15px;
+    color: #4ade80;
+    font-weight: bold;
+  }
+  button {
+    width: 100%;
+    padding: 15px;
+    margin-top: 20px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: #000;
+    font-size: 1.1em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+  button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(74,222,128,0.4); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .output {
+    background: #0d1117;
+    border-radius: 12px;
+    padding: 20px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+    color: #c9d1d9;
+  }
+  .output .stdout { color: #7ee787; }
+  .output .stderr { color: #ff7b72; }
+  .output .meta { color: #79c0ff; margin-bottom: 10px; }
+  .status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    font-weight: bold;
+  }
+  .status.ok { background: #22c55e; color: #000; }
+  .status.err { background: #ef4444; }
+  .status.loading { background: #f59e0b; color: #000; }
+  .files-list {
+    list-style: none;
+  }
+  .files-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-size: 0.9em;
+  }
+  .files-list a {
+    color: #4ade80;
+    text-decoration: none;
+  }
+  .files-list a:hover { text-decoration: underline; }
+</style>
 </head>
 <body>
-<h2>Xin chào</h2>
-<p id="status">Đang kiểm tra...</p>
-<pre id="log" style="background:#111;color:#0f0;padding:10px;font-size:12px;white-space:pre-wrap"></pre>
+<div class="container">
+  <h1>🐍 Python File Runner</h1>
+  <p class="subtitle">Upload file .py và xem kết quả chạy ngay trên web</p>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  <div class="card">
+    <div class="drop-zone" id="dropZone">
+      <div class="icon">📄</div>
+      <div>Kéo thả file .py vào đây hoặc click để chọn</div>
+      <div class="file-name" id="fileName"></div>
+      <input type="file" id="fileInput" accept=".py">
+    </div>
+    <button id="runBtn" disabled>▶️ Upload & Chạy</button>
+  </div>
 
-const app = initializeApp({
-  databaseURL: "https://shopmduy-default-rtdb.asia-southeast1.firebasedatabase.app/"
+  <div class="card" id="resultCard" style="display:none;">
+    <h3 style="margin-bottom:15px;">📊 Kết quả</h3>
+    <div class="output" id="output"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-bottom:15px;">📁 File đã upload</h3>
+    <ul class="files-list" id="filesList">
+      <li style="justify-content:center; opacity:0.5;">Đang tải...</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileName = document.getElementById('fileName');
+const runBtn = document.getElementById('runBtn');
+const resultCard = document.getElementById('resultCard');
+const output = document.getElementById('output');
+const filesList = document.getElementById('filesList');
+
+let selectedFile = null;
+
+// ===== Chọn file =====
+dropZone.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files.length > 0) setFile(e.target.files[0]);
 });
-const db = getDatabase(app);
 
-const logEl = document.getElementById("log");
-function log(m) {
-  console.log(m);
-  logEl.textContent += m + "\n";
-  document.getElementById("status").textContent = m;
-}
+// ===== Kéo thả =====
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length > 0) setFile(e.dataTransfer.files[0]);
+});
 
-function countryFlag(code) {
-  if (!code || code.length !== 2) return "🏳";
-  code = code.toUpperCase();
-  return String.fromCodePoint(0x1F1E6 + code.charCodeAt(0) - 65,
-                              0x1F1E6 + code.charCodeAt(1) - 65);
-}
-
-// Lấy IP trước (chỉ 1 API duy nhất, ổn định)
-async function getMyIP() {
-  const r = await fetch("https://api.ipify.org?format=json", { cache: "no-store" });
-  const d = await r.json();
-  return d.ip;
-}
-
-// Geocode IP → tọa độ. Dùng ipwho.is vì có tọa độ + ổn định
-async function geocodeIP(ip) {
-  const r = await fetch("https://ipwho.is/" + ip, { cache: "no-store" });
-  const d = await r.json();
-  if (!d.success || !d.latitude) throw new Error("Không lấy được tọa độ");
-  return {
-    lat: d.latitude,
-    lng: d.longitude,
-    city: d.city || "?",
-    region: d.region || "?",
-    country: d.country_code || "?",
-    org: (d.connection && d.connection.isp) || "?"
-  };
-}
-
-(async () => {
-  try {
-    log("1. Lấy IP...");
-    const ip = await getMyIP();
-    log("   IP: " + ip);
-
-    // Kiểm tra cache
-    const cacheKey = "geo_" + ip;
-    const cached = localStorage.getItem(cacheKey);
-    let geo;
-
-    if (cached) {
-      geo = JSON.parse(cached);
-      log("2. Dùng cache cho IP này:");
-      log("   " + geo.lat + ", " + geo.lng);
-    } else {
-      log("2. Geocode IP lần đầu...");
-      geo = await geocodeIP(ip);
-      localStorage.setItem(cacheKey, JSON.stringify(geo));
-      log("   " + geo.lat + ", " + geo.lng);
-      log("   (đã lưu cache — lần sau vào lại sẽ ra y vậy)");
-    }
-
-    const record = {
-      ip: ip,
-      org: geo.org,
-      country: geo.country,
-      flag: countryFlag(geo.country),
-      region: geo.region,
-      city: geo.city,
-      latitude: geo.lat,
-      longitude: geo.lng,
-      source: "ip-cached",
-      userAgent: navigator.userAgent,
-      language: navigator.language,
-      screen: screen.width + "x" + screen.height,
-      time: new Date().toISOString(),
-      sent: false,
-      status: "⏳ chờ gửi",
-      sent_at: ""
-    };
-
-    log("3. Ghi Firebase...");
-    const result = await push(ref(db, "visits"), record);
-    log("   OK, key=" + result.key);
-    log("XONG. Vị trí đã cố định cho IP này.");
-  } catch (e) {
-    log("DỪNG: " + e.message);
+function setFile(file) {
+  if (!file.name.endsWith('.py')) {
+    alert('Chỉ chấp nhận file .py!');
+    return;
   }
-})();
+  selectedFile = file;
+  fileName.textContent = `✅ ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+  runBtn.disabled = false;
+}
+
+// ===== Chạy file =====
+runBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+
+  runBtn.disabled = true;
+  runBtn.textContent = '⏳ Đang chạy...';
+  resultCard.style.display = 'block';
+  output.innerHTML = '<span class="status loading">Đang xử lý...</span>';
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (data.success) {
+      let html = '';
+      html += `<div class="meta">📄 ${data.filename} • ⏱ ${data.time} • Exit code: ${data.returncode}</div>`;
+
+      if (data.stdout) {
+        html += `<div class="stdout">──── STDOUT ────\n${escapeHtml(data.stdout)}</div>`;
+      }
+      if (data.stderr) {
+        html += `<div class="stderr">\n──── STDERR ────\n${escapeHtml(data.stderr)}</div>`;
+      }
+      if (!data.stdout && !data.stderr) {
+        html += '<div style="opacity:0.5;">(Không có output)</div>';
+      }
+
+      output.innerHTML = html;
+      loadFiles();
+    } else {
+      output.innerHTML = `<span class="status err">LỖI</span>\n\n${escapeHtml(data.error)}`;
+    }
+  } catch (err) {
+    output.innerHTML = `<span class="status err">LỖI MẠNG</span>\n\n${escapeHtml(err.message)}`;
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = '▶️ Upload & Chạy';
+  }
+});
+
+// ===== Danh sách file =====
+async function loadFiles() {
+  try {
+    const res = await fetch('/files');
+    const files = await res.json();
+    if (files.length === 0) {
+      filesList.innerHTML = '<li style="justify-content:center; opacity:0.5;">Chưa có file nào</li>';
+      return;
+    }
+    filesList.innerHTML = files.map(f => `
+      <li>
+        <span>📄 ${escapeHtml(f.name)} <small style="opacity:0.6;">(${(f.size/1024).toFixed(1)} KB)</small></span>
+        <a href="/download/${encodeURIComponent(f.name)}">⬇️ Tải</a>
+      </li>
+    `).join('');
+  } catch (e) {
+    filesList.innerHTML = '<li style="opacity:0.5;">Không tải được danh sách</li>';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+loadFiles();
 </script>
 </body>
 </html>
