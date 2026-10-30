@@ -3,253 +3,141 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🐍 Python File Runner</title>
+<title>Upload File lên Firebase</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-    min-height: 100vh;
-    padding: 30px 20px;
-    color: #fff;
-  }
-  .container {
-    max-width: 900px;
-    margin: 0 auto;
-  }
-  h1 {
-    text-align: center;
-    margin-bottom: 10px;
-    font-size: 2em;
-  }
-  .subtitle {
-    text-align: center;
-    opacity: 0.8;
-    margin-bottom: 30px;
-  }
-  .card {
-    background: rgba(255,255,255,0.1);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 16px;
-    padding: 25px;
-    margin-bottom: 20px;
-  }
-  .drop-zone {
-    border: 3px dashed rgba(255,255,255,0.4);
-    border-radius: 12px;
-    padding: 50px 20px;
-    text-align: center;
-    cursor: pointer;
-    transition: 0.3s;
-  }
-  .drop-zone:hover, .drop-zone.dragover {
-    border-color: #4ade80;
-    background: rgba(74,222,128,0.1);
-  }
-  .drop-zone .icon { font-size: 3em; margin-bottom: 10px; }
-  .drop-zone input { display: none; }
-  .file-name {
-    margin-top: 15px;
-    color: #4ade80;
-    font-weight: bold;
-  }
-  button {
-    width: 100%;
-    padding: 15px;
-    margin-top: 20px;
-    border: none;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #4ade80, #22c55e);
-    color: #000;
-    font-size: 1.1em;
-    font-weight: bold;
-    cursor: pointer;
-    transition: 0.3s;
-  }
-  button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(74,222,128,0.4); }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
+  .container { max-width: 800px; margin: 0 auto; }
+  h1 { text-align: center; margin-bottom: 20px; color: #38bdf8; }
+  .card { background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+  label { display: block; margin-bottom: 8px; font-weight: bold; color: #94a3b8; }
+  input[type="text"], select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: white; margin-bottom: 15px; }
+  input[type="file"] { width: 100%; padding: 12px; background: #0f172a; border: 1px dashed #475569; border-radius: 8px; color: #94a3b8; cursor: pointer; margin-bottom: 15px; }
+  button { width: 100%; padding: 15px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-size: 1.1em; font-weight: bold; cursor: pointer; }
+  button:hover { background: #0ea5e9; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .output {
-    background: #0d1117;
-    border-radius: 12px;
-    padding: 20px;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 0.9em;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 400px;
-    overflow-y: auto;
-    color: #c9d1d9;
-  }
-  .output .stdout { color: #7ee787; }
-  .output .stderr { color: #ff7b72; }
-  .output .meta { color: #79c0ff; margin-bottom: 10px; }
-  .status {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 0.85em;
-    font-weight: bold;
-  }
-  .status.ok { background: #22c55e; color: #000; }
-  .status.err { background: #ef4444; }
-  .status.loading { background: #f59e0b; color: #000; }
-  .files-list {
-    list-style: none;
-  }
-  .files-list li {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    font-size: 0.9em;
-  }
-  .files-list a {
-    color: #4ade80;
-    text-decoration: none;
-  }
-  .files-list a:hover { text-decoration: underline; }
+  .output { background: #000; padding: 15px; border-radius: 8px; font-family: monospace; color: #a3e635; margin-top: 20px; display: none; }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>🐍 Python File Runner</h1>
-  <p class="subtitle">Upload file .py và xem kết quả chạy ngay trên web</p>
+  <h1>☁️ Upload File lên Firebase</h1>
 
   <div class="card">
-    <div class="drop-zone" id="dropZone">
-      <div class="icon">📄</div>
-      <div>Kéo thả file .py vào đây hoặc click để chọn</div>
-      <div class="file-name" id="fileName"></div>
-      <input type="file" id="fileInput" accept=".py">
-    </div>
-    <button id="runBtn" disabled>▶️ Upload & Chạy</button>
+    <form id="uploadForm">
+      <label>1. Đường dẫn (Target Path)</label>
+      <input type="text" id="targetPath" placeholder="Ví dụ: zlapi" value="">
+
+      <label>2. Chọn tất cả file (Ctrl+Click để chọn nhiều)</label>
+      <input type="file" id="fileInput" multiple required>
+      <div id="fileList" style="font-size: 0.9em; color: #94a3b8; margin-bottom: 15px;"></div>
+
+      <label>3. Chọn file cần chạy (Main File)</label>
+      <select id="mainFileSelect" required>
+        <option value="">-- Vui lòng chọn file --</option>
+      </select>
+
+      <button type="submit" id="uploadBtn">🚀 Gửi lên Firebase</button>
+    </form>
   </div>
 
-  <div class="card" id="resultCard" style="display:none;">
-    <h3 style="margin-bottom:15px;">📊 Kết quả</h3>
-    <div class="output" id="output"></div>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-bottom:15px;">📁 File đã upload</h3>
-    <ul class="files-list" id="filesList">
-      <li style="justify-content:center; opacity:0.5;">Đang tải...</li>
-    </ul>
-  </div>
+  <div class="output" id="output"></div>
 </div>
 
-<script>
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-const fileName = document.getElementById('fileName');
-const runBtn = document.getElementById('runBtn');
-const resultCard = document.getElementById('resultCard');
-const output = document.getElementById('output');
-const filesList = document.getElementById('filesList');
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getDatabase, ref, push, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-let selectedFile = null;
+  // Cấu hình Firebase của bạn (Chỉ cần databaseURL là đủ cho Realtime DB)
+  const firebaseConfig = {
+    databaseURL: "https://shopmduy-default-rtdb.asia-southeast1.firebasedatabase.app/"
+  };
 
-// ===== Chọn file =====
-dropZone.addEventListener('click', () => fileInput.click());
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
 
-fileInput.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) setFile(e.target.files[0]);
-});
+  const fileInput = document.getElementById('fileInput');
+  const fileList = document.getElementById('fileList');
+  const mainFileSelect = document.getElementById('mainFileSelect');
+  const uploadForm = document.getElementById('uploadForm');
+  const output = document.getElementById('output');
+  const uploadBtn = document.getElementById('uploadBtn');
 
-// ===== Kéo thả =====
-dropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZone.classList.add('dragover');
-});
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  if (e.dataTransfer.files.length > 0) setFile(e.dataTransfer.files[0]);
-});
+  // Hiển thị danh sách file và điền vào Select
+  fileInput.addEventListener('change', () => {
+    const files = fileInput.files;
+    fileList.innerHTML = '';
+    mainFileSelect.innerHTML = '<option value="">-- Chọn file để chạy --</option>';
 
-function setFile(file) {
-  if (!file.name.endsWith('.py')) {
-    alert('Chỉ chấp nhận file .py!');
-    return;
-  }
-  selectedFile = file;
-  fileName.textContent = `✅ ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
-  runBtn.disabled = false;
-}
-
-// ===== Chạy file =====
-runBtn.addEventListener('click', async () => {
-  if (!selectedFile) return;
-
-  runBtn.disabled = true;
-  runBtn.textContent = '⏳ Đang chạy...';
-  resultCard.style.display = 'block';
-  output.innerHTML = '<span class="status loading">Đang xử lý...</span>';
-
-  const formData = new FormData();
-  formData.append('file', selectedFile);
-
-  try {
-    const res = await fetch('/upload', { method: 'POST', body: formData });
-    const data = await res.json();
-
-    if (data.success) {
-      let html = '';
-      html += `<div class="meta">📄 ${data.filename} • ⏱ ${data.time} • Exit code: ${data.returncode}</div>`;
-
-      if (data.stdout) {
-        html += `<div class="stdout">──── STDOUT ────\n${escapeHtml(data.stdout)}</div>`;
-      }
-      if (data.stderr) {
-        html += `<div class="stderr">\n──── STDERR ────\n${escapeHtml(data.stderr)}</div>`;
-      }
-      if (!data.stdout && !data.stderr) {
-        html += '<div style="opacity:0.5;">(Không có output)</div>';
-      }
-
-      output.innerHTML = html;
-      loadFiles();
-    } else {
-      output.innerHTML = `<span class="status err">LỖI</span>\n\n${escapeHtml(data.error)}`;
+    if (files.length > 0) {
+      Array.from(files).forEach(f => {
+        fileList.innerHTML += `• ${f.name} <br>`;
+        const opt = document.createElement('option');
+        opt.value = f.name;
+        opt.textContent = f.name;
+        mainFileSelect.appendChild(opt);
+      });
     }
-  } catch (err) {
-    output.innerHTML = `<span class="status err">LỖI MẠNG</span>\n\n${escapeHtml(err.message)}`;
-  } finally {
-    runBtn.disabled = false;
-    runBtn.textContent = '▶️ Upload & Chạy';
-  }
-});
+  });
 
-// ===== Danh sách file =====
-async function loadFiles() {
-  try {
-    const res = await fetch('/files');
-    const files = await res.json();
-    if (files.length === 0) {
-      filesList.innerHTML = '<li style="justify-content:center; opacity:0.5;">Chưa có file nào</li>';
+  // Hàm chuyển File sang Base64 để lưu vào Firebase
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+
+  // Xử lý gửi lên Firebase
+  uploadForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = '⏳ Đang xử lý...';
+    output.style.display = 'block';
+    output.innerHTML = 'Đang đọc file và đẩy lên Firebase...<br>';
+
+    const targetPath = document.getElementById('targetPath').value;
+    const mainFile = mainFileSelect.value;
+    const files = fileInput.files;
+
+    if (!mainFile) {
+      alert("Vui lòng chọn file để chạy!");
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = '🚀 Gửi lên Firebase';
       return;
     }
-    filesList.innerHTML = files.map(f => `
-      <li>
-        <span>📄 ${escapeHtml(f.name)} <small style="opacity:0.6;">(${(f.size/1024).toFixed(1)} KB)</small></span>
-        <a href="/download/${encodeURIComponent(f.name)}">⬇️ Tải</a>
-      </li>
-    `).join('');
-  } catch (e) {
-    filesList.innerHTML = '<li style="opacity:0.5;">Không tải được danh sách</li>';
-  }
-}
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
-}
+    try {
+      const filesData = {};
+      // Đọc tất cả file thành Base64
+      for (let i = 0; i < files.length; i++) {
+        const base64 = await fileToBase64(files[i]);
+        filesData[files[i].name] = base64;
+      }
 
-loadFiles();
+      // Tạo object dữ liệu
+      const jobData = {
+        path: targetPath,
+        main_file: mainFile,
+        files: filesData, // Lưu toàn bộ nội dung file dạng Base64
+        timestamp: Date.now(),
+        status: "pending" // Trạng thái chờ server xử lý
+      };
+
+      // Đẩy lên Firebase (Tạo một node mới ngẫu nhiên)
+      const jobsRef = ref(db, 'jobs');
+      const newJobRef = push(jobsRef);
+      await set(newJobRef, jobData);
+
+      output.innerHTML = `✅ Đã gửi lên Firebase thành công!<br>Mã Job: ${newJobRef.key}<br>Chờ Server xử lý...`;
+    } catch (error) {
+      output.innerHTML = `<span style="color:red">Lỗi: ${error.message}</span>`;
+    } finally {
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = '🚀 Gửi lên Firebase';
+    }
+  });
 </script>
 </body>
 </html>
